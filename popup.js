@@ -375,7 +375,7 @@ document.getElementById("open-farm").addEventListener("click", () => {
 });
 
 document.getElementById("test-reminder").addEventListener("click", () => {
-  browser.runtime.sendMessage({ type: "testReminder" }).then(() => window.close());
+  browser.runtime.sendMessage({ type: "testReminder" });
 });
 
 main();

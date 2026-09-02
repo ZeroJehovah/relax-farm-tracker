@@ -189,12 +189,17 @@ async function openFarmTab() {
 // notifications are reachable/not blocked.
 function fireTestReminder() {
   const message = "你的作物即将成熟";
+  // Use a fresh id every time so repeated tests always re-deliver a visible
+  // notification (Chrome may merely replace a still-open notification with the
+  // same id). requireInteraction keeps it on screen until the user acts, making
+  // delivery unmistakable.
   return browser.notifications
-    .create("farm-reminder-test", {
+    .create("farm-reminder-test-" + Date.now(), {
       type: "basic",
       iconUrl: browser.runtime.getURL("icons/icon128.png"),
       title: "轻松农场 · 作物提醒",
       message,
+      requireInteraction: true,
     })
     .catch(() => {});
 }
