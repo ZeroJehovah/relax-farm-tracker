@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>轻松农场成熟追踪</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="title">
+        <span class="dot" id="status-dot"></span>
+        <h1>轻松农场 · 成熟追踪</h1>
+        <span class="ver" id="ver">-</span>
+      </div>
+      <div class="subtitle" id="updated-at">—</div>
+    </header>
+
+    <main id="app" class="app">
+      <div class="empty" id="empty">暂无作物数据<br />打开农场页面后会自动记录成熟时间</div>
+
+      <div class="next" id="next" hidden>
+        <div class="label">最近成熟</div>
+        <div class="next-times">
+          <div class="time" id="next-time">—</div>
+          <div class="time-abs" id="next-time-abs">—</div>
+        </div>
+      </div>
+
+      <div class="panel" id="plots-panel">
+        <div class="groups" id="groups"></div>
+      </div>
+
+      <section class="panel reminders">
+        <div class="rem-list" id="rem-list"></div>
+        <button id="add-reminder" class="add-btn" type="button">＋ 添加提醒</button>
+      </section>
+    </main>
+
+    <script src="browser-shim.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

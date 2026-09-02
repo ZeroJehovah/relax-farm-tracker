@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "轻松农场作物成熟追踪",
+  "version": "0.4.1",
+  "description": "记录黑与白福利站轻松农场的作物成熟时间，在图标显示最近成熟倒计时，支持成熟前后提醒。仅被动 hook 页面请求，不发起任何请求。",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://cdk.hybgzs.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://cdk.hybgzs.com/*"],
+      "js": ["hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://cdk.hybgzs.com/*"],
+      "js": ["browser-shim.js", "content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "轻松农场作物成熟追踪",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
