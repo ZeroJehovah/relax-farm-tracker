@@ -53,6 +53,12 @@ body {
   font-size: 11px;
   color: #b3aa99;
   font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+
+.title .ver:hover {
+  color: #7e9a7a;
+  text-decoration: underline;
 }
 
 .dot {
