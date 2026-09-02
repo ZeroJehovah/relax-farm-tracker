@@ -160,6 +160,7 @@ function fireNotification(reminder, target, cropsCount) {
       iconUrl: browser.runtime.getURL("icons/icon128.png"),
       title: "轻松农场 · 作物提醒",
       message,
+      requireInteraction: true,
     })
     .catch(() => {});
 }
