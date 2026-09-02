@@ -50,6 +50,31 @@ function el(tag, cls) {
   return n;
 }
 
+// Morandi state colors, shared with background.js:
+//   red (mature) / orange (<=10min) / green (otherwise).
+const STATE_COLORS = {
+  red: "#C05C5C",
+  orange: "#C98F4B",
+  green: "#7E9A7A",
+};
+
+function matureState(ms) {
+  const now = Date.now();
+  const diff = ms - now;
+  if (diff <= 0) return "red";
+  if (diff <= 10 * 60 * 1000) return "orange";
+  return "green";
+}
+
+function cropIconUrl(seedId) {
+  if (!seedId) return null;
+  try {
+    return browser.runtime.getURL("icons/crops/" + seedId + ".png");
+  } catch (e) {
+    return null;
+  }
+}
+
 // ---- crop list (flat, ungrouped) ----
 
 // Batch-planted crops share the same maturity moment but the API assigns each
@@ -67,6 +92,7 @@ function clusterCrops(list) {
     if (
       last &&
       last.seedName === c.seedName &&
+      last.seedId === c.seedId &&
       last.level === c.level &&
       c.maturesAt - last.maxMaturesAt <= GAP_MS
     ) {
@@ -74,6 +100,7 @@ function clusterCrops(list) {
       last.maxMaturesAt = c.maturesAt;
     } else {
       clusters.push({
+        seedId: c.seedId,
         seedName: c.seedName,
         level: c.level,
         maturesAt: c.maturesAt,
@@ -88,15 +115,24 @@ function clusterCrops(list) {
 function renderCropRow(c) {
   const row = el("div", "row");
   const meta = el("div", "meta");
+  const iconUrl = cropIconUrl(c.seedId);
+  if (iconUrl) {
+    const icon = el("img", "crop-icon");
+    icon.src = iconUrl;
+    icon.alt = "";
+    meta.appendChild(icon);
+  }
   if (c.level != null) {
     meta.appendChild(Object.assign(el("span", "lv"), { textContent: `Lv${c.level}` }));
   }
-  meta.appendChild(Object.assign(el("span", "crop"), { textContent: `${c.seedName} ×${c.count}` }));
+  meta.appendChild(Object.assign(el("span", "crop"), { textContent: c.seedName }));
+  meta.appendChild(Object.assign(el("span", "crop-count"), { textContent: `×${c.count}` }));
   row.appendChild(meta);
 
-  const mature = Date.now() >= c.maturesAt;
+  const state = matureState(c.maturesAt);
+  const mature = state === "red";
   const times = el("div", "times");
-  const rem = el("span", "time-rem" + (mature ? " mature" : ""));
+  const rem = el("span", "time-rem state-" + state);
   rem.textContent = mature ? "已成熟" : countdownText(c.maturesAt);
   const abs = el("span", "time-abs");
   abs.textContent = fmtClock(c.maturesAt);
@@ -124,9 +160,11 @@ function renderCrops(state) {
   emptyEl.setAttribute("hidden", "");
 
   const nearest = nearestMaturesAt(active);
-  const isMature = now >= nearest;
+  const stateColor = matureState(nearest);
+  const isMature = nearest <= now;
   nextEl.removeAttribute("hidden");
-  nextEl.classList.toggle("mature", isMature);
+  nextEl.classList.remove("state-red", "state-orange", "state-green");
+  nextEl.classList.add("state-" + stateColor);
 
   if (isMature) {
     nextEl.querySelector(".label").textContent = "已成熟作物";
@@ -246,19 +284,17 @@ function renderReminders(state) {
   const reminders = state.reminders || [];
   const sig = reminderSig(reminders);
   const listEl = document.getElementById("rem-list");
-  const addBtn = document.getElementById("add-reminder");
   if (renderedRemSig !== sig) {
     renderedRemSig = sig;
     listEl.innerHTML = "";
     if (!reminders.length) {
       const empty = el("div", "rem-empty");
-      empty.textContent = "暂无提醒，点击下方「添加提醒」创建";
+      empty.textContent = "暂无提醒";
       listEl.appendChild(empty);
     } else {
       reminders.forEach((r) => listEl.appendChild(buildReminderRow(r)));
     }
   }
-  addBtn.hidden = reminders.length === 0;
 }
 
 function renderReminderPreviews(state, nearest) {
@@ -323,6 +359,14 @@ async function main() {
 
 document.getElementById("add-reminder").addEventListener("click", () => {
   browser.runtime.sendMessage({ type: "addReminder" }).then(afterStateChange);
+});
+
+document.getElementById("open-farm").addEventListener("click", () => {
+  browser.runtime.sendMessage({ type: "openFarm" }).then(() => window.close());
+});
+
+document.getElementById("test-reminder").addEventListener("click", () => {
+  browser.runtime.sendMessage({ type: "testReminder" }).then(() => window.close());
 });
 
 main();

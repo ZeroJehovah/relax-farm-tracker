@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "轻松农场作物成熟追踪",
-  "version": "0.4.1",
+  "version": "0.6.0",
   "description": "记录黑与白福利站轻松农场的作物成熟时间，在图标显示最近成熟倒计时，支持成熟前后提醒。仅被动 hook 页面请求，不发起任何请求。",
   "permissions": [
     "storage",

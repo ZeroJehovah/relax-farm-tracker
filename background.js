@@ -74,6 +74,22 @@ function nearestMaturesAt(crops) {
 //   0 < ms < 60s       -> "<1m"
 //   1..99 min          -> "~Nm"  (approx minutes)
 //   >= 100 min         -> ">99m"
+// Morandi state colors, shared convention with the popup:
+//   mature (red) / soon <=10min (orange) / otherwise (green).
+const STATE_COLORS = {
+  red: "#C05C5C",
+  orange: "#C98F4B",
+  green: "#7E9A7A",
+};
+
+function matureState(nearest, now) {
+  if (nearest == null) return "gray";
+  const diff = nearest - now;
+  if (diff <= 0) return "red";
+  if (diff <= 10 * 60 * 1000) return "orange";
+  return "green";
+}
+
 function badgeText(ms) {
   if (ms <= 0) return { text: "熟", mature: true };
   const minutes = Math.floor(ms / 60000);
@@ -95,7 +111,7 @@ function updateBadge() {
   const crops = activeCrops();
   const nearest = nearestMaturesAt(crops);
   let text = "";
-  let color = "#5b6b7a";
+  let color = "#9aa1b2";
   let title = "轻松农场 · 暂无种植";
   if (nearest != null) {
     const diff = nearest - nowMs();
@@ -104,7 +120,7 @@ function updateBadge() {
     title = p.mature
       ? `有作物已成熟（${crops.length} 块地）`
       : `最近成熟: ${crops.length} 块地 · 约 ${detailText(diff)}`;
-    color = p.mature ? "#16a34a" : "#4f46e5";
+    color = STATE_COLORS[matureState(nearest, nowMs())] || color;
   }
   return browser.browserAction
     .setBadgeText({ text })
@@ -171,6 +187,23 @@ async function openFarmTab() {
       /* ignore */
     }
   }
+}
+
+// Fire a notification that exactly mimics a real reminder, used to test that
+// notifications are reachable/not blocked.
+function fireTestReminder() {
+  const now = Date.now() + 60 * 1000;
+  const p = (n) => String(n).padStart(2, "0");
+  const clock = `${new Date(now).getMonth() + 1}/${new Date(now).getDate()} ${p(new Date(now).getHours())}:${p(new Date(now).getMinutes())}:${p(new Date(now).getSeconds())}`;
+  const message = `作物成熟前 60 秒（${clock}），有 1 块地可操作，点击进入农场。`;
+  return browser.notifications
+    .create("farm-reminder-test", {
+      type: "basic",
+      iconUrl: browser.runtime.getURL("icons/icon128.png"),
+      title: "轻松农场 · 作物提醒",
+      message,
+    })
+    .catch(() => {});
 }
 
 // Reminders are dynamically anchored to the current nearest maturity. If that
@@ -336,6 +369,10 @@ browser.runtime.onMessage.addListener((msg) => {
         const res = moveReminder(msg.id, msg.dir);
         return persist().then(() => ({ ok: res.ok, state }));
       }
+      case "openFarm":
+        return openFarmTab().then(() => ({ ok: true }));
+      case "testReminder":
+        return fireTestReminder().then(() => ({ ok: true }));
       default:
         return Promise.resolve({ ok: true });
     }
