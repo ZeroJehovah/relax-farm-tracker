@@ -10,12 +10,6 @@ function fmtClock(ms) {
   return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function fmtClockSec(ms) {
-  const d = new Date(ms);
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
 function countdownText(ms) {
   const diff = ms - Date.now();
   if (diff <= 0) return "已成熟";
@@ -73,6 +67,24 @@ function cropIconUrl(seedId) {
   } catch (e) {
     return null;
   }
+}
+
+// Lucide (MIT) inline icons, 24x24 stroke viewBox.
+const LUCIDE = {
+  "chevron-up":
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>',
+  "chevron-down":
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+  "trash-2":
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
+};
+
+function iconBtn(name) {
+  const b = el("button", "");
+  b.type = "button";
+  b.innerHTML = LUCIDE[name];
+  b.querySelector("svg").setAttribute("aria-hidden", "true");
+  return b;
 }
 
 // ---- crop list (flat, ungrouped) ----
@@ -221,21 +233,21 @@ function buildReminderRow(r) {
       .then(afterStateChange);
   });
 
-  const secs = el("input", "rem-secs");
-  secs.type = "number";
-  secs.min = "0";
-  secs.step = "1";
-  secs.value = String(r.seconds);
-  secs.addEventListener("change", () => {
-    const v = Number(secs.value);
-    if (!Number.isFinite(v)) return;
+  const mins = el("input", "rem-secs");
+  mins.type = "number";
+  mins.min = "0";
+  mins.step = "1";
+  mins.value = String(Math.round(r.seconds / 60));
+  mins.addEventListener("change", () => {
+    const v = Number(mins.value);
+    if (!Number.isFinite(v) || v < 0) return;
     browser.runtime
-      .sendMessage({ type: "updateReminder", id: r.id, patch: { seconds: v } })
+      .sendMessage({ type: "updateReminder", id: r.id, patch: { seconds: Math.round(v * 60) } })
       .then(afterStateChange);
   });
   const secsWrap = el("span", "rem-secs-wrap");
-  secsWrap.appendChild(secs);
-  secsWrap.appendChild(Object.assign(el("span", "rem-unit"), { textContent: "秒" }));
+  secsWrap.appendChild(mins);
+  secsWrap.appendChild(Object.assign(el("span", "rem-unit"), { textContent: "分" }));
 
   const when = el("span", "rem-when");
   when.dataset.role = "when";
@@ -243,25 +255,22 @@ function buildReminderRow(r) {
 
   const actions = el("span", "rem-actions");
 
-  const up = el("button", "rem-move");
-  up.type = "button";
-  up.textContent = "↑";
+  const up = iconBtn("chevron-up");
+  up.className = "rem-move";
   up.title = "上移";
   up.addEventListener("click", () => {
     browser.runtime.sendMessage({ type: "moveReminder", id: r.id, dir: "up" }).then(afterStateChange);
   });
 
-  const down = el("button", "rem-move");
-  down.type = "button";
-  down.textContent = "↓";
+  const down = iconBtn("chevron-down");
+  down.className = "rem-move";
   down.title = "下移";
   down.addEventListener("click", () => {
     browser.runtime.sendMessage({ type: "moveReminder", id: r.id, dir: "down" }).then(afterStateChange);
   });
 
-  const del = el("button", "rem-del");
-  del.type = "button";
-  del.textContent = "✕";
+  const del = iconBtn("trash-2");
+  del.className = "rem-del";
   del.title = "删除提醒";
   del.addEventListener("click", () => {
     browser.runtime.sendMessage({ type: "removeReminder", id: r.id }).then(afterStateChange);
@@ -312,7 +321,7 @@ function renderReminderPreviews(state, nearest) {
       when.textContent = "无作物";
       return;
     }
-    when.textContent = `预计提醒 ${fmtClockSec(target)}`;
+    when.textContent = fmtClock(target);
   });
 }
 

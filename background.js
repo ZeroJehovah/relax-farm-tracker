@@ -152,11 +152,7 @@ function reminderTarget(reminder, nearest) {
 }
 
 function fireNotification(reminder, target, cropsCount) {
-  const when = new Date(target);
-  const p = (n) => String(n).padStart(2, "0");
-  const clock = `${when.getMonth() + 1}/${when.getDate()} ${p(when.getHours())}:${p(when.getMinutes())}:${p(when.getSeconds())}`;
-  const dir = reminder.mode === "after" ? "之后" : "之前";
-  const message = `作物成熟${dir} ${reminder.seconds} 秒（${clock}），有 ${cropsCount} 块地可操作，点击进入农场。`;
+  const message = reminder.mode === "after" ? "你的作物已成熟" : "你的作物即将成熟";
   const notId = "farm-reminder-" + reminder.id;
   return browser.notifications
     .create(notId, {
@@ -192,10 +188,7 @@ async function openFarmTab() {
 // Fire a notification that exactly mimics a real reminder, used to test that
 // notifications are reachable/not blocked.
 function fireTestReminder() {
-  const now = Date.now() + 60 * 1000;
-  const p = (n) => String(n).padStart(2, "0");
-  const clock = `${new Date(now).getMonth() + 1}/${new Date(now).getDate()} ${p(new Date(now).getHours())}:${p(new Date(now).getMinutes())}:${p(new Date(now).getSeconds())}`;
-  const message = `作物成熟前 60 秒（${clock}），有 1 块地可操作，点击进入农场。`;
+  const message = "你的作物即将成熟";
   return browser.notifications
     .create("farm-reminder-test", {
       type: "basic",
