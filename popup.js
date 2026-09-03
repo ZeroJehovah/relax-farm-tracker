@@ -2,8 +2,6 @@
 // Reminders are anchored to the nearest (earliest) crop maturity; edit here by
 // messaging the background (which owns the authoritative state).
 
-const MATURE_GHOST_MS = 5 * 60 * 1000;
-
 function fmtClock(ms) {
   const d = new Date(ms);
   const p = (n) => String(n).padStart(2, "0");
@@ -25,7 +23,7 @@ function countdownText(ms) {
 }
 
 function isActive(c, t) {
-  return !c.harvested && (c.maturesAt > t || t - c.maturesAt < MATURE_GHOST_MS);
+  return !c.harvested;
 }
 
 function nearestMaturesAt(active) {

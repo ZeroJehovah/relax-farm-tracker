@@ -69,7 +69,7 @@ function persist() {
 function activeCrops(ts) {
   const t = ts || nowMs();
   return state.crops.filter(
-    (c) => !c.harvested && (c.maturesAt > t || t - c.maturesAt < MATURE_GHOST_MS)
+    (c) => !c.harvested
   );
 }
 
