@@ -19,6 +19,7 @@ const FARM_URL = "https://cdk.hybgzs.com/entertainment/farm";
 const FARM_URL_PATTERN = "*://cdk.hybgzs.com/entertainment/farm*";
 const ALARM_NAME = "farm-tick";
 const ALARM_PERIOD_MIN = 1; // chrome.alarms minimum period
+const REMINDER_ALARM_PREFIX = "reminder-"; // per-reminder alarms
 
 let state = defaultState();
 let statePromise = null;
@@ -265,7 +266,45 @@ function evaluateReminders() {
     state.diag.reminderLog = state.diag.reminderLog.slice(-20);
   }
 
-  return Promise.all(jobs).then(() => persist());
+  return Promise.all(jobs).then(() => persist()).then(() => scheduleReminderAlarms(nearest));
+}
+
+// Schedule individual alarms for each active reminder to ensure they fire even
+// if the periodic tick alarm fails.
+function scheduleReminderAlarms(nearest) {
+  if (nearest == null) {
+    return clearReminderAlarms();
+  }
+
+  const now = nowMs();
+  const jobs = [];
+
+  for (const r of state.reminders) {
+    if (!r.enabled) continue;
+    const target = reminderTarget(r, nearest);
+    if (target == null || target <= now || r.lastFiredTarget === target) continue;
+
+    // Schedule an alarm at the target time (converted to minutes from now)
+    const delayMinutes = Math.max(1, Math.ceil((target - now) / 60000));
+    const alarmName = REMINDER_ALARM_PREFIX + r.id;
+
+    jobs.push(
+      browser.alarms.create(alarmName, { delayInMinutes: delayMinutes })
+        .catch(() => {})
+    );
+  }
+
+  return Promise.all(jobs);
+}
+
+// Clear all reminder-specific alarms
+function clearReminderAlarms() {
+  return browser.alarms.getAll().then((alarms) => {
+    const jobs = alarms
+      .filter((a) => a.name.startsWith(REMINDER_ALARM_PREFIX))
+      .map((a) => browser.alarms.clear(a.name).catch(() => {}));
+    return Promise.all(jobs);
+  }).catch(() => {});
 }
 
 function createReminder() {
@@ -344,7 +383,9 @@ function ingestCrops(rawCrops, extra) {
   }
   state.updatedAt = nowMs();
 
-  return updateBadge().then(() => evaluateReminders()).then(() => persist());
+  return updateBadge()
+    .then(() => evaluateReminders())
+    .then(() => persist());
 }
 
 function ingestPlots(plotsData) {
@@ -432,9 +473,21 @@ browser.notifications.onClicked.addListener(() => {
 });
 
 browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm && alarm.name === ALARM_NAME) {
+  if (!alarm) return undefined;
+
+  // Periodic tick alarm
+  if (alarm.name === ALARM_NAME) {
     return ensureState().then(tick);
   }
+
+  // Per-reminder alarm
+  if (alarm.name.startsWith(REMINDER_ALARM_PREFIX)) {
+    return ensureState().then(() => {
+      // Force evaluation when a reminder alarm fires
+      return evaluateReminders();
+    });
+  }
+
   return undefined;
 });
 
