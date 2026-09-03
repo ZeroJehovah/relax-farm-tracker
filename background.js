@@ -80,9 +80,9 @@ function nearestMaturesAt(crops) {
 
 // Compact minute-granularity badge text (Chrome badge shows ~4 chars).
 //   ms <= 0            -> "熟"
-//   0 < ms < 60s       -> "<1m"
-//   1..99 min          -> "~Nm"  (approx minutes)
-//   >= 100 min         -> ">99m"
+//   0 < ms < 60s       -> "1m"
+//   < 60 min           -> "Nm"  (whole minutes)
+//   >= 60 min          -> ">1h"
 // Morandi state colors, shared convention with the popup:
 //   mature (red) / soon <=10min (orange) / otherwise (green).
 const STATE_COLORS = {
@@ -102,9 +102,9 @@ function matureState(nearest, now) {
 function badgeText(ms) {
   if (ms <= 0) return { text: "熟", mature: true };
   const minutes = Math.floor(ms / 60000);
-  if (minutes <= 0) return { text: "<1m", mature: false };
-  if (minutes >= 100) return { text: ">99m", mature: false };
-  return { text: `~${minutes}m`, mature: false };
+  if (minutes >= 60) return { text: ">1h", mature: false };
+  if (minutes <= 0) return { text: "1m", mature: false };
+  return { text: `${minutes}m`, mature: false };
 }
 
 function detailText(ms) {
