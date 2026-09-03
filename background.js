@@ -495,9 +495,11 @@ browser.runtime.onInstalled.addListener(() => {
   return ensureState().then(() => ensureAlarm()).catch(() => {});
 });
 browser.runtime.onStartup.addListener(() => {
-  return ensureState().then(() => ensureAlarm()).catch(() => {});
+  return ensureState().then(() => ensureAlarm()).then(() => updateBadge()).catch(() => {});
 });
 
 // Boot: ensure state is loaded and the alarm is registered once the worker
 // wakes (worker may have restarted without onInstalled/onStartup firing).
-ensureState().then(() => ensureAlarm()).catch(() => {});
+// The badge is re-rendered from persisted storage so the countdown appears
+// immediately after a browser restart, even before the next alarm tick.
+ensureState().then(() => ensureAlarm()).then(() => updateBadge()).catch(() => {});
