@@ -161,7 +161,16 @@ function reminderTarget(reminder, nearest) {
 }
 
 function fireNotification(reminder, target, cropsCount) {
-  const message = reminder.mode === "after" ? "你的作物已成熟" : "你的作物即将成熟";
+  let message;
+  if (reminder.mode === "after" || reminder.seconds <= 0) {
+    message = "你的作物已成熟";
+  } else {
+    const sec = reminder.seconds;
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec % 3600) / 60);
+    const part = h > 0 ? `${h}h${m}min` : `${m}min`;
+    message = `你的作物即将成熟(~${part})`;
+  }
   const notId = "farm-reminder-" + reminder.id;
   return browser.notifications
     .create(notId, {
@@ -198,7 +207,7 @@ async function openFarmTab() {
 // Fire a notification that exactly mimics a real reminder, used to test that
 // notifications are reachable/not blocked.
 function fireTestReminder() {
-  const message = "你的作物即将成熟";
+  const message = "你的作物即将成熟(~5min)";
   // Use a fresh id every time so repeated tests always re-deliver a visible
   // notification (Chrome may merely replace a still-open notification with the
   // same id). requireInteraction keeps it on screen until the user acts, making
