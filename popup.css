@@ -427,3 +427,42 @@ body {
   text-align: center;
   padding: 10px 0;
 }
+
+/* ---- diagnostics ---- */
+
+.diag {
+  margin-top: 8px;
+}
+
+.diag summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9a917f;
+  user-select: none;
+}
+
+.diag summary:hover {
+  color: #45413b;
+}
+
+.diag-log {
+  padding: 8px 10px;
+  font-size: 11px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.diag-entry {
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e0d7;
+}
+
+.diag-entry:last-child {
+  border-bottom: none;
+}
+
+.diag-entry > div {
+  margin: 2px 0;
+}

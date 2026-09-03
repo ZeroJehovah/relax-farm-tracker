@@ -31,7 +31,15 @@ function defaultState() {
     level: null,
     reminders: [], // [{id, enabled, mode:'before'|'after', seconds, lastFiredTarget}]
     updatedAt: 0,
-    diag: { lastCropsAt: 0, cropsHits: 0 },
+    diag: {
+      lastCropsAt: 0,
+      cropsHits: 0,
+      lastTickAt: 0,
+      tickCount: 0,
+      lastEvalAt: 0,
+      evalCount: 0,
+      reminderLog: [], // last 20 eval results
+    },
   };
 }
 
@@ -211,20 +219,53 @@ function fireTestReminder() {
 function evaluateReminders() {
   const now = nowMs();
   const nearest = nearestMaturesAt(activeCrops(now));
+
+  // Diagnostic logging
+  state.diag = state.diag || {};
+  state.diag.lastEvalAt = now;
+  state.diag.evalCount = (state.diag.evalCount || 0) + 1;
+  state.diag.reminderLog = state.diag.reminderLog || [];
+
   let dirty = false;
   const jobs = [];
+  const logEntry = {
+    at: now,
+    nearest: nearest,
+    fired: [],
+    skipped: [],
+  };
+
   for (const r of state.reminders) {
-    if (!r.enabled) continue;
+    if (!r.enabled) {
+      logEntry.skipped.push({ id: r.id, reason: 'disabled' });
+      continue;
+    }
     const target = reminderTarget(r, nearest);
-    if (target == null) continue;
-    if (r.lastFiredTarget === target) continue;
+    if (target == null) {
+      logEntry.skipped.push({ id: r.id, reason: 'no-target' });
+      continue;
+    }
+    if (r.lastFiredTarget === target) {
+      logEntry.skipped.push({ id: r.id, reason: 'already-fired', target });
+      continue;
+    }
     if (now >= target) {
       r.lastFiredTarget = target;
       jobs.push(fireNotification(r, target, activeCrops(now).length));
+      logEntry.fired.push({ id: r.id, target, mode: r.mode, seconds: r.seconds });
       dirty = true;
+    } else {
+      logEntry.skipped.push({ id: r.id, reason: 'not-yet', target, waitMs: target - now });
     }
   }
-  return Promise.all(jobs).then(() => (dirty ? persist() : undefined));
+
+  // Keep last 20 evals
+  state.diag.reminderLog.push(logEntry);
+  if (state.diag.reminderLog.length > 20) {
+    state.diag.reminderLog = state.diag.reminderLog.slice(-20);
+  }
+
+  return Promise.all(jobs).then(() => persist());
 }
 
 function createReminder() {
@@ -326,8 +367,13 @@ function ingestLevel(levelData) {
 // ---- alarm/tick ----
 
 function tick() {
+  const now = nowMs();
+  state.diag = state.diag || {};
+  state.diag.lastTickAt = now;
+  state.diag.tickCount = (state.diag.tickCount || 0) + 1;
+
   pruneCrops();
-  return updateBadge().then(() => evaluateReminders()).then(() => persist());
+  return updateBadge().then(() => evaluateReminders());
 }
 
 function ensureAlarm() {
@@ -352,6 +398,8 @@ browser.runtime.onMessage.addListener((msg) => {
         return ingestLevel(msg.data).then(() => ({ ok: true }));
       case "getState":
         return Promise.resolve({ ok: true, state });
+      case "getDiag":
+        return Promise.resolve({ ok: true, diag: state.diag || {} });
       case "addReminder": {
         const r = createReminder();
         return persist().then(() => ({ ok: true, reminder: r, state }));
@@ -391,7 +439,7 @@ browser.alarms.onAlarm.addListener((alarm) => {
 });
 
 browser.runtime.onInstalled.addListener(() => {
-  return ensureAlarm().catch(() => {});
+  return ensureState().then(() => ensureAlarm()).catch(() => {});
 });
 browser.runtime.onStartup.addListener(() => {
   return ensureState().then(() => ensureAlarm()).catch(() => {});
