@@ -77,6 +77,9 @@
     };
     const alarms = {
       create: chrome.alarms ? p(chrome.alarms, "create", noop) : noop,
+      get: chrome.alarms ? p(chrome.alarms, "get", async () => undefined) : async () => undefined,
+      getAll: chrome.alarms ? p(chrome.alarms, "getAll", async () => []) : async () => [],
+      clear: chrome.alarms ? p(chrome.alarms, "clear", noop) : noop,
       onAlarm: chrome.alarms ? chrome.alarms.onAlarm : { addListener() {} },
     };
     // The action/browserAction APIs only exist in the worker context; in the
@@ -109,7 +112,7 @@
   self.browser = {
     storage: { local: { get: async () => ({}), set: noop } },
     runtime: { onMessage: evt, sendMessage: noop, onInstalled: evt, onStartup: evt, getURL: () => "" },
-    alarms: { create: noop, onAlarm: evt },
+    alarms: { create: noop, get: async () => undefined, getAll: async () => [], clear: noop, onAlarm: evt },
     browserAction: { setBadgeText: noop, setBadgeBackgroundColor: noop, setTitle: noop },
     notifications: { create: noop, onClicked: evt },
     tabs: { query: async () => [], update: noop, create: noop },

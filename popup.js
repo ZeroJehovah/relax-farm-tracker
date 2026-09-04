@@ -351,16 +351,27 @@ function renderDiagnostics(state) {
     html += `<div><strong>#${logs.length - i}</strong> ${time}</div>`;
     html += `<div>最近成熟: ${nearest}</div>`;
 
-    if (log.fired.length) {
-      html += `<div style='color: #c05c5c'>🔔 触发 ${log.fired.length} 个:</div>`;
-      log.fired.forEach(f => {
+    const fired = log.fired || [];
+    const failed = log.failed || [];
+    const skipped = log.skipped || [];
+
+    if (fired.length) {
+      html += `<div style='color: #c05c5c'>🔔 触发 ${fired.length} 个:</div>`;
+      fired.forEach(f => {
         html += `<div style='margin-left: 1em; font-size: 0.9em'>• ${f.id.substring(0, 12)}... ${f.mode} ${f.seconds/60}分 → ${fmtClock(f.target)}</div>`;
       });
     }
 
-    if (log.skipped.length) {
-      html += `<div style='color: #9a917f'>跳过 ${log.skipped.length} 个:</div>`;
-      log.skipped.forEach(s => {
+    if (failed.length) {
+      html += `<div style='color: #c05c5c'>⚠️ 通知失败 ${failed.length} 个:</div>`;
+      failed.forEach(f => {
+        html += `<div style='margin-left: 1em; font-size: 0.9em'>• ${f.id.substring(0, 12)}... ${f.error || "未知错误"}</div>`;
+      });
+    }
+
+    if (skipped.length) {
+      html += `<div style='color: #9a917f'>跳过 ${skipped.length} 个:</div>`;
+      skipped.forEach(s => {
         let reason = s.reason;
         if (s.reason === 'disabled') reason = '已禁用';
         else if (s.reason === 'no-target') reason = '无目标';

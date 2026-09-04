@@ -20,6 +20,7 @@ const FARM_URL_PATTERN = "*://cdk.hybgzs.com/entertainment/farm*";
 const ALARM_NAME = "farm-tick";
 const ALARM_PERIOD_MIN = 1; // chrome.alarms minimum period
 const REMINDER_ALARM_PREFIX = "reminder-"; // per-reminder alarms
+const REMINDER_NOTIFICATION_PREFIX = "farm-reminder-";
 
 let state = defaultState();
 let statePromise = null;
@@ -160,6 +161,14 @@ function reminderTarget(reminder, nearest) {
     : nearest - reminder.seconds * 1000;
 }
 
+// Keep one notification per reminder target. Reusing only the reminder id
+// makes Chrome clear/replace an old, still-visible notification (especially
+// with requireInteraction); Windows can keep that replacement in Notification
+// Center without showing a distinct new toast.
+function reminderNotificationId(reminder, target) {
+  return REMINDER_NOTIFICATION_PREFIX + reminder.id + "-" + String(Math.trunc(target));
+}
+
 function fireNotification(reminder, target, cropsCount) {
   let message;
   if (reminder.mode === "after" || reminder.seconds <= 0) {
@@ -171,16 +180,25 @@ function fireNotification(reminder, target, cropsCount) {
     const part = h > 0 ? `${h}h${m}min` : `${m}min`;
     message = `你的作物即将成熟(~${part})`;
   }
-  const notId = "farm-reminder-" + reminder.id;
-  return browser.notifications
-    .create(notId, {
+  const notId = reminderNotificationId(reminder, target);
+  return Promise.resolve()
+    .then(() => browser.notifications.create(notId, {
       type: "basic",
       iconUrl: browser.runtime.getURL("icons/icon128.png"),
       title: "轻松农场 · 作物提醒",
       message,
       requireInteraction: true,
-    })
-    .catch(() => {});
+    }))
+    .then((createdId) => {
+      // The shim intentionally resolves API errors to undefined for
+      // compatibility with callback- and Promise-based Chrome APIs. Treat a
+      // missing id as a failed delivery so the next evaluation can retry.
+      // A successful id means Chrome accepted the notification; Windows may
+      // still suppress the on-screen banner according to its notification and
+      // focus settings.
+      if (!createdId) throw new Error("notifications.create 未返回通知 ID");
+      return createdId;
+    });
 }
 
 async function openFarmTab() {
@@ -236,12 +254,12 @@ function evaluateReminders() {
   state.diag.evalCount = (state.diag.evalCount || 0) + 1;
   state.diag.reminderLog = state.diag.reminderLog || [];
 
-  let dirty = false;
   const jobs = [];
   const logEntry = {
     at: now,
     nearest: nearest,
     fired: [],
+    failed: [],
     skipped: [],
   };
 
@@ -261,9 +279,22 @@ function evaluateReminders() {
     }
     if (now >= target) {
       r.lastFiredTarget = target;
-      jobs.push(fireNotification(r, target, activeCrops(now).length));
-      logEntry.fired.push({ id: r.id, target, mode: r.mode, seconds: r.seconds });
-      dirty = true;
+      const fired = { id: r.id, target, mode: r.mode, seconds: r.seconds };
+      jobs.push(
+        fireNotification(r, target, activeCrops(now).length)
+          .then(() => {
+            logEntry.fired.push(fired);
+          })
+          .catch((error) => {
+            // Do not permanently consume a reminder when the OS/browser
+            // rejects delivery. A later tick or page update should retry it.
+            if (r.lastFiredTarget === target) r.lastFiredTarget = null;
+            logEntry.failed.push({
+              ...fired,
+              error: error && error.message ? error.message : String(error || "unknown"),
+            });
+          })
+      );
     } else {
       logEntry.skipped.push({ id: r.id, reason: 'not-yet', target, waitMs: target - now });
     }
@@ -281,39 +312,86 @@ function evaluateReminders() {
 // Schedule individual alarms for each active reminder to ensure they fire even
 // if the periodic tick alarm fails.
 function scheduleReminderAlarms(nearest) {
+  if (!browser.alarms || typeof browser.alarms.create !== "function") return Promise.resolve();
   if (nearest == null) {
     return clearReminderAlarms();
   }
 
   const now = nowMs();
-  const jobs = [];
+  const desired = new Map();
 
   for (const r of state.reminders) {
     if (!r.enabled) continue;
     const target = reminderTarget(r, nearest);
     if (target == null || target <= now || r.lastFiredTarget === target) continue;
 
-    // Schedule an alarm at the target time (converted to minutes from now)
-    const delayMinutes = Math.max(1, Math.ceil((target - now) / 60000));
     const alarmName = REMINDER_ALARM_PREFIX + r.id;
-
-    jobs.push(
-      browser.alarms.create(alarmName, { delayInMinutes: delayMinutes })
-        .catch(() => {})
-    );
+    desired.set(alarmName, target);
   }
 
-  return Promise.all(jobs);
+  // Use the absolute `when` value instead of a rounded delay. The old
+  // ceil(delayInMinutes) approach could move an alarm forward on every page
+  // refresh, so a target near the next minute was repeatedly postponed.
+  const getAll = browser.alarms && typeof browser.alarms.getAll === "function"
+    ? browser.alarms.getAll.bind(browser.alarms)
+    : () => Promise.resolve([]);
+  return getAll().then((alarms) => {
+    const existing = new Map(
+      (alarms || [])
+        .filter((a) => a && typeof a.name === "string" && a.name.startsWith(REMINDER_ALARM_PREFIX))
+        .map((a) => [a.name, a])
+    );
+    const jobs = [];
+    const clear = browser.alarms && typeof browser.alarms.clear === "function"
+      ? browser.alarms.clear.bind(browser.alarms)
+      : null;
+
+    // Remove alarms for disabled/deleted reminders or stale targets.
+    existing.forEach((alarm, name) => {
+      if (!desired.has(name) && clear) {
+        jobs.push(clear(name).catch(() => {}));
+      }
+    });
+
+    desired.forEach((target, name) => {
+      const alarm = existing.get(name);
+      const scheduled = alarm && Number(alarm.scheduledTime);
+      // Chrome may clamp a very near alarm by up to its minimum granularity;
+      // keep a pending alarm in that case, but replace an absent/stale one.
+      const isPending = Number.isFinite(scheduled) && scheduled > now;
+      const isForThisTarget =
+        isPending && scheduled >= target - 1000 && scheduled <= target + 2 * 60 * 1000;
+      if (isForThisTarget) return;
+      jobs.push(browser.alarms.create(name, { when: target }).catch(() => {}));
+    });
+
+    return Promise.all(jobs);
+  }).catch(() => {
+    // Older browser shims may not expose getAll/clear. Still install the
+    // absolute-time alarms as a best-effort fallback.
+    return Promise.all(
+      Array.from(desired, ([name, target]) =>
+        browser.alarms.create(name, { when: target }).catch(() => {})
+      )
+    );
+  });
 }
 
 // Clear all reminder-specific alarms
 function clearReminderAlarms() {
+  if (!browser.alarms || typeof browser.alarms.getAll !== "function") return Promise.resolve();
+  if (typeof browser.alarms.clear !== "function") return Promise.resolve();
   return browser.alarms.getAll().then((alarms) => {
     const jobs = alarms
-      .filter((a) => a.name.startsWith(REMINDER_ALARM_PREFIX))
+      .filter((a) => a && typeof a.name === "string" && a.name.startsWith(REMINDER_ALARM_PREFIX))
       .map((a) => browser.alarms.clear(a.name).catch(() => {}));
     return Promise.all(jobs);
   }).catch(() => {});
+}
+
+function persistAndScheduleReminders() {
+  const nearest = nearestMaturesAt(activeCrops());
+  return persist().then(() => scheduleReminderAlarms(nearest));
 }
 
 function createReminder() {
@@ -427,7 +505,19 @@ function tick() {
 }
 
 function ensureAlarm() {
-  return browser.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+  // Do not recreate the periodic alarm on every service-worker wake. Replacing
+  // it repeatedly can keep moving the next tick forward and make the worker
+  // miss the only evaluation window around a reminder target.
+  if (!browser.alarms || typeof browser.alarms.get !== "function") {
+    return browser.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+  }
+  return browser.alarms.get(ALARM_NAME).then((alarm) => {
+    if (alarm && Number(alarm.periodInMinutes) > 0) return alarm;
+    return browser.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+  }).catch(() => {
+    // Best effort for older implementations without alarms.get().
+    return browser.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+  });
 }
 
 // ---- lifecycle / IPC ----
@@ -452,19 +542,19 @@ browser.runtime.onMessage.addListener((msg) => {
         return Promise.resolve({ ok: true, diag: state.diag || {} });
       case "addReminder": {
         const r = createReminder();
-        return persist().then(() => ({ ok: true, reminder: r, state }));
+        return persistAndScheduleReminders().then(() => ({ ok: true, reminder: r, state }));
       }
       case "updateReminder": {
         const res = updateReminder(msg.id, msg.patch || {});
-        return persist().then(() => ({ ok: res.ok, state }));
+        return persistAndScheduleReminders().then(() => ({ ok: res.ok, state }));
       }
       case "removeReminder": {
         const res = removeReminder(msg.id);
-        return persist().then(() => ({ ok: res.ok, state }));
+        return persistAndScheduleReminders().then(() => ({ ok: res.ok, state }));
       }
       case "moveReminder": {
         const res = moveReminder(msg.id, msg.dir);
-        return persist().then(() => ({ ok: res.ok, state }));
+        return persistAndScheduleReminders().then(() => ({ ok: res.ok, state }));
       }
       case "openFarm":
         return openFarmTab().then(() => ({ ok: true }));
@@ -483,14 +573,15 @@ browser.notifications.onClicked.addListener(() => {
 
 browser.alarms.onAlarm.addListener((alarm) => {
   if (!alarm) return undefined;
+  const name = typeof alarm.name === "string" ? alarm.name : "";
 
   // Periodic tick alarm
-  if (alarm.name === ALARM_NAME) {
+  if (name === ALARM_NAME) {
     return ensureState().then(tick);
   }
 
   // Per-reminder alarm
-  if (alarm.name.startsWith(REMINDER_ALARM_PREFIX)) {
+  if (name.startsWith(REMINDER_ALARM_PREFIX)) {
     return ensureState().then(() => {
       // Force evaluation when a reminder alarm fires
       return evaluateReminders();
@@ -504,11 +595,19 @@ browser.runtime.onInstalled.addListener(() => {
   return ensureState().then(() => ensureAlarm()).catch(() => {});
 });
 browser.runtime.onStartup.addListener(() => {
-  return ensureState().then(() => ensureAlarm()).then(() => updateBadge()).catch(() => {});
+  return ensureState()
+    .then(() => ensureAlarm())
+    .then(() => evaluateReminders())
+    .then(() => updateBadge())
+    .catch(() => {});
 });
 
 // Boot: ensure state is loaded and the alarm is registered once the worker
 // wakes (worker may have restarted without onInstalled/onStartup firing).
 // The badge is re-rendered from persisted storage so the countdown appears
 // immediately after a browser restart, even before the next alarm tick.
-ensureState().then(() => ensureAlarm()).then(() => updateBadge()).catch(() => {});
+ensureState()
+  .then(() => ensureAlarm())
+  .then(() => evaluateReminders())
+  .then(() => updateBadge())
+  .catch(() => {});
