@@ -328,69 +328,6 @@ function afterStateChange() {
   main();
 }
 
-function renderDiagnostics(state) {
-  const diagPanel = document.getElementById("diag-panel");
-  const diagContent = document.getElementById("diag-content");
-  const diag = state.diag || {};
-
-  if (!diag.reminderLog || !diag.reminderLog.length) {
-    diagPanel.setAttribute("hidden", "");
-    return;
-  }
-
-  diagPanel.removeAttribute("hidden");
-
-  let html = "<div class='diag-log'>";
-  html += `<p><strong>最近 ${diag.reminderLog.length} 次提醒评估：</strong></p>`;
-
-  const logs = diag.reminderLog.slice().reverse();
-  logs.forEach((log, i) => {
-    const time = fmtClock(log.at);
-    const nearest = log.nearest ? fmtClock(log.nearest) : '无';
-    html += `<div class='diag-entry'>`;
-    html += `<div><strong>#${logs.length - i}</strong> ${time}</div>`;
-    html += `<div>最近成熟: ${nearest}</div>`;
-
-    const fired = log.fired || [];
-    const failed = log.failed || [];
-    const skipped = log.skipped || [];
-
-    if (fired.length) {
-      html += `<div style='color: #c05c5c'>🔔 触发 ${fired.length} 个:</div>`;
-      fired.forEach(f => {
-        html += `<div style='margin-left: 1em; font-size: 0.9em'>• ${f.id.substring(0, 12)}... ${f.mode} ${f.seconds/60}分 → ${fmtClock(f.target)}</div>`;
-      });
-    }
-
-    if (failed.length) {
-      html += `<div style='color: #c05c5c'>⚠️ 通知失败 ${failed.length} 个:</div>`;
-      failed.forEach(f => {
-        html += `<div style='margin-left: 1em; font-size: 0.9em'>• ${f.id.substring(0, 12)}... ${f.error || "未知错误"}</div>`;
-      });
-    }
-
-    if (skipped.length) {
-      html += `<div style='color: #9a917f'>跳过 ${skipped.length} 个:</div>`;
-      skipped.forEach(s => {
-        let reason = s.reason;
-        if (s.reason === 'disabled') reason = '已禁用';
-        else if (s.reason === 'no-target') reason = '无目标';
-        else if (s.reason === 'already-fired') reason = '已触发';
-        else if (s.reason === 'not-yet') {
-          const waitMin = Math.ceil(s.waitMs / 60000);
-          reason = `未到时间(还需${waitMin}分钟)`;
-        }
-        html += `<div style='margin-left: 1em; font-size: 0.9em'>• ${s.id.substring(0, 12)}... ${reason}</div>`;
-      });
-    }
-
-    html += `</div>`;
-  });
-
-  html += "</div>";
-  diagContent.innerHTML = html;
-}
-
 async function main() {
   let state;
   try {
@@ -409,20 +346,7 @@ async function main() {
   const updatedEl = document.getElementById("updated-at");
   const dot = document.getElementById("status-dot");
   if (updatedAt) {
-    const diag = state.diag || {};
-    let t = `更新于 ${fmtClock(updatedAt)}`;
-    if (diag.lastCropsAt) {
-      t += ` · crops 命中 ${diag.cropsHits} 次（${fmtClock(diag.lastCropsAt)}）`;
-    } else {
-      t += " · 未收到 crops 消息";
-    }
-    if (diag.lastTickAt) {
-      t += ` · tick ${diag.tickCount} 次（${fmtClock(diag.lastTickAt)}）`;
-    }
-    if (diag.lastEvalAt) {
-      t += ` · eval ${diag.evalCount} 次（${fmtClock(diag.lastEvalAt)}）`;
-    }
-    updatedEl.textContent = t;
+    updatedEl.textContent = `更新于 ${fmtClock(updatedAt)}`;
     dot.classList.add("online");
   } else {
     updatedEl.textContent = "尚未记录数据";
@@ -431,7 +355,6 @@ async function main() {
   const nearest = renderCrops(state);
   renderReminders(state);
   renderReminderPreviews(state, nearest);
-  renderDiagnostics(state);
 }
 
 document.getElementById("add-reminder").addEventListener("click", () => {
