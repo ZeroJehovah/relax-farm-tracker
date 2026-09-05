@@ -346,7 +346,7 @@ async function main() {
   const updatedEl = document.getElementById("updated-at");
   const dot = document.getElementById("status-dot");
   if (updatedAt) {
-    updatedEl.textContent = `更新于 ${fmtClock(updatedAt)}`;
+    updatedEl.textContent = `(${fmtClock(updatedAt)})`;
     dot.classList.add("online");
   } else {
     updatedEl.textContent = "尚未记录数据";
