@@ -25,6 +25,10 @@ const REMINDER_NOTIFICATION_PREFIX = "farm-reminder-";
 let state = defaultState();
 let statePromise = null;
 let reminderSeq = 0;
+// The first evaluation in a newly awakened worker is a catch-up pass. This
+// also covers browser startup when a persisted alarm event arrives before the
+// onStartup listener callback.
+let startupCatchUpPending = true;
 
 function defaultState() {
   return {
@@ -244,7 +248,9 @@ function fireTestReminder() {
 // Reminders are dynamically anchored to the current nearest maturity. If that
 // nearest maturity changes (crop harvested, or a newer crop matures sooner),
 // the reminder re-anchors and a stale trigger is naturally dropped.
-function evaluateReminders() {
+function evaluateReminders(options) {
+  const startupCatchUp = startupCatchUpPending || !!(options && options.startupCatchUp);
+  startupCatchUpPending = false;
   const now = nowMs();
   const nearest = nearestMaturesAt(activeCrops(now));
 
@@ -255,6 +261,7 @@ function evaluateReminders() {
   state.diag.reminderLog = state.diag.reminderLog || [];
 
   const jobs = [];
+  const due = [];
   const logEntry = {
     at: now,
     nearest: nearest,
@@ -278,26 +285,52 @@ function evaluateReminders() {
       continue;
     }
     if (now >= target) {
-      r.lastFiredTarget = target;
-      const fired = { id: r.id, target, mode: r.mode, seconds: r.seconds };
-      jobs.push(
-        fireNotification(r, target, activeCrops(now).length)
-          .then(() => {
-            logEntry.fired.push(fired);
-          })
-          .catch((error) => {
-            // Do not permanently consume a reminder when the OS/browser
-            // rejects delivery. A later tick or page update should retry it.
-            if (r.lastFiredTarget === target) r.lastFiredTarget = null;
-            logEntry.failed.push({
-              ...fired,
-              error: error && error.message ? error.message : String(error || "unknown"),
-            });
-          })
-      );
+      due.push({ r, target });
     } else {
       logEntry.skipped.push({ id: r.id, reason: 'not-yet', target, waitMs: target - now });
     }
+  }
+
+  // When the browser starts after several reminder targets have passed, only
+  // restore the most recent missed reminder. Consume older missed targets so
+  // the next periodic tick does not replay them one by one.
+  let toFire = due;
+  if (startupCatchUp && due.length > 1) {
+    const latest = due.reduce((current, item) =>
+      item.target > current.target ? item : current
+    );
+    toFire = [latest];
+    for (const item of due) {
+      if (item === latest) continue;
+      item.r.lastFiredTarget = item.target;
+      logEntry.skipped.push({
+        id: item.r.id,
+        reason: 'startup-superseded',
+        target: item.target,
+      });
+    }
+  }
+
+  const cropsCount = activeCrops(now).length;
+  for (const item of toFire) {
+    const { r, target } = item;
+    r.lastFiredTarget = target;
+    const fired = { id: r.id, target, mode: r.mode, seconds: r.seconds };
+    jobs.push(
+      fireNotification(r, target, cropsCount)
+        .then(() => {
+          logEntry.fired.push(fired);
+        })
+        .catch((error) => {
+          // Do not permanently consume a reminder when the OS/browser
+          // rejects delivery. A later tick or page update should retry it.
+          if (r.lastFiredTarget === target) r.lastFiredTarget = null;
+          logEntry.failed.push({
+            ...fired,
+            error: error && error.message ? error.message : String(error || "unknown"),
+          });
+        })
+    );
   }
 
   // Keep last 20 evals
@@ -597,7 +630,7 @@ browser.runtime.onInstalled.addListener(() => {
 browser.runtime.onStartup.addListener(() => {
   return ensureState()
     .then(() => ensureAlarm())
-    .then(() => evaluateReminders())
+    .then(() => evaluateReminders({ startupCatchUp: true }))
     .then(() => updateBadge())
     .catch(() => {});
 });
@@ -608,6 +641,6 @@ browser.runtime.onStartup.addListener(() => {
 // immediately after a browser restart, even before the next alarm tick.
 ensureState()
   .then(() => ensureAlarm())
-  .then(() => evaluateReminders())
+  .then(() => evaluateReminders({ startupCatchUp: true }))
   .then(() => updateBadge())
   .catch(() => {});
