@@ -54,7 +54,7 @@
     var arr = data && data.data;
     if (!Array.isArray(arr)) return;
     var sig = JSON.stringify(arr.map(function (c) {
-      return [c.id || "", c.maturesAt || "", c.isHarvested ? 1 : 0];
+      return [c.id || "", c.maturesAt || "", c.isHarvested ? 1 : 0, c.seedImage || ""];
     }).sort());
     var t = Date.now();
     if (sig === lastCropsSig && t - lastCropsTime < 1000) return;

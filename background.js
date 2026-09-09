@@ -477,6 +477,7 @@ function ingestCrops(rawCrops, extra) {
     id: c.id,
     seedId: c.seedId,
     seedName: c.seedName,
+    seedImage: typeof c.seedImage === "string" ? c.seedImage : null,
     plotIndex: c.plotIndex,
     level: c.level == null ? null : Number(c.level),
     yieldMultiplier: c.yieldMultiplier,

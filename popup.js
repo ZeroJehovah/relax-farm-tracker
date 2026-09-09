@@ -58,13 +58,34 @@ function matureState(ms) {
   return "green";
 }
 
-function cropIconUrl(seedId) {
-  if (!seedId) return null;
-  try {
-    return browser.runtime.getURL("icons/crops/" + seedId + ".png");
-  } catch (e) {
-    return null;
+const CROP_IMAGE_ORIGIN = "https://cdk.hybgzs.com";
+
+function cropIconUrls(crop) {
+  const urls = [];
+  const seedId = typeof crop.seedId === "string" && /^[a-z0-9_-]+$/i.test(crop.seedId)
+    ? crop.seedId : null;
+
+  // seedImage is normally a base path, e.g. /farm/crops/starfruit. The
+  // site's mature sprite is <base>_s4.png. Derive it from seedId as well so
+  // crops saved before seedImage was recorded work immediately after upgrading.
+  for (const source of [crop.seedImage, seedId ? `/farm/crops/${seedId}` : null]) {
+    if (typeof source !== "string" || !source.trim()) continue;
+    try {
+      const url = new URL(source, CROP_IMAGE_ORIGIN);
+      // Only load the site's static PNG sprites, never API paths or other hosts.
+      if (url.origin !== CROP_IMAGE_ORIGIN || url.username || url.password || url.search || url.hash) continue;
+      if (!/^\/farm\/crops\/[a-z0-9_-]+(?:\.png)?$/i.test(url.pathname)) continue;
+      if (!/\.png$/i.test(url.pathname)) url.pathname += "_s4.png";
+      urls.push(url.href);
+      break;
+    } catch (e) {
+      // Ignore malformed page data and try the seedId-derived path.
+    }
   }
+
+  if (seedId) urls.push(browser.runtime.getURL(`icons/crops/${seedId}.png`));
+  urls.push(browser.runtime.getURL("icons/icon48.png"));
+  return urls;
 }
 
 // Lucide (MIT) inline icons, 24x24 stroke viewBox.
@@ -93,6 +114,7 @@ function iconBtn(name) {
 // collapses into a single row with a count, regardless of sub-second jitter or
 // second-boundary crossing.
 const GAP_MS = 1000;
+let renderedCropsSig = null;
 
 function clusterCrops(list) {
   const sorted = list.slice().sort((a, b) => a.maturesAt - b.maturesAt);
@@ -108,10 +130,12 @@ function clusterCrops(list) {
     ) {
       last.count += 1;
       last.maxMaturesAt = c.maturesAt;
+      if (!last.seedImage && c.seedImage) last.seedImage = c.seedImage;
     } else {
       clusters.push({
         seedId: c.seedId,
         seedName: c.seedName,
+        seedImage: c.seedImage,
         level: c.level,
         maturesAt: c.maturesAt,
         maxMaturesAt: c.maturesAt,
@@ -125,13 +149,18 @@ function clusterCrops(list) {
 function renderCropRow(c) {
   const row = el("div", "row");
   const meta = el("div", "meta");
-  const iconUrl = cropIconUrl(c.seedId);
-  if (iconUrl) {
-    const icon = el("img", "crop-icon");
-    icon.src = iconUrl;
-    icon.alt = "";
-    meta.appendChild(icon);
-  }
+  const icon = el("img", "crop-icon");
+  const iconUrls = cropIconUrls(c);
+  let iconIndex = 0;
+  icon.alt = "";
+  icon.referrerPolicy = "no-referrer";
+  icon.addEventListener("error", () => {
+    iconIndex += 1;
+    if (iconIndex < iconUrls.length) icon.src = iconUrls[iconIndex];
+    else icon.hidden = true;
+  });
+  icon.src = iconUrls[0];
+  meta.appendChild(icon);
   if (c.level != null) {
     meta.appendChild(Object.assign(el("span", "lv"), { textContent: `Lv${c.level}` }));
   }
@@ -139,17 +168,19 @@ function renderCropRow(c) {
   meta.appendChild(Object.assign(el("span", "crop-count"), { textContent: `×${c.count}` }));
   row.appendChild(meta);
 
-  const state = matureState(c.maturesAt);
-  const mature = state === "red";
   const times = el("div", "times");
-  const rem = el("span", "time-rem state-" + state);
-  rem.textContent = mature ? "已成熟" : countdownText(c.maturesAt);
-  const abs = el("span", "time-abs");
-  abs.textContent = fmtClock(c.maturesAt);
-  times.appendChild(rem);
-  times.appendChild(abs);
+  times.appendChild(el("span", "time-rem"));
+  times.appendChild(el("span", "time-abs"));
   row.appendChild(times);
+  updateCropRowTimes(row, c.maturesAt);
   return row;
+}
+
+function updateCropRowTimes(row, maturesAt) {
+  const rem = row.querySelector(".time-rem");
+  rem.className = "time-rem state-" + matureState(maturesAt);
+  rem.textContent = countdownText(maturesAt);
+  row.querySelector(".time-abs").textContent = fmtClock(maturesAt);
 }
 
 function renderCrops(state) {
@@ -165,6 +196,7 @@ function renderCrops(state) {
     nextEl.setAttribute("hidden", "");
     plotsPanelEl.setAttribute("hidden", "");
     groupsEl.innerHTML = "";
+    renderedCropsSig = null;
     return null;
   }
   emptyEl.setAttribute("hidden", "");
@@ -188,8 +220,15 @@ function renderCrops(state) {
 
   const clusters = clusterCrops(active).sort((a, b) => a.maturesAt - b.maturesAt);
   plotsPanelEl.removeAttribute("hidden");
-  groupsEl.innerHTML = "";
-  clusters.forEach((c) => groupsEl.appendChild(renderCropRow(c)));
+  const sig = JSON.stringify(clusters);
+  // Keep image elements (and their fallback choice) while only the countdown
+  // changes. Rebuilding them every second would restart failed image requests.
+  if (renderedCropsSig !== sig) {
+    groupsEl.replaceChildren(...clusters.map(renderCropRow));
+    renderedCropsSig = sig;
+  } else {
+    clusters.forEach((c, i) => updateCropRowTimes(groupsEl.children[i], c.maturesAt));
+  }
 
   return nearest;
 }
