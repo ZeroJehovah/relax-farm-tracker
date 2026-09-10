@@ -59,6 +59,106 @@ function matureState(ms) {
 }
 
 const CROP_IMAGE_ORIGIN = "https://cdk.hybgzs.com";
+const CROP_ICON_CACHE_KEY = "farmIconCache";
+
+let cropIconCache = {};
+let cropIconCacheWrite = Promise.resolve();
+const pendingCropIconFetches = new Map();
+
+function isRemoteCropIconUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === CROP_IMAGE_ORIGIN &&
+      /^\/farm\/crops\/[a-z0-9_-]+\.png$/i.test(parsed.pathname);
+  } catch (e) {
+    return false;
+  }
+}
+
+function isImageDataUrl(value) {
+  return typeof value === "string" && /^data:image\/png(?:;|,)/i.test(value);
+}
+
+const cropIconCacheReady = (async () => {
+  try {
+    const stored = await browser.storage.local.get(CROP_ICON_CACHE_KEY);
+    const cache = stored && stored[CROP_ICON_CACHE_KEY];
+    if (!cache || typeof cache !== "object") return;
+    Object.entries(cache).forEach(([url, dataUrl]) => {
+      if (isRemoteCropIconUrl(url) && isImageDataUrl(dataUrl)) {
+        cropIconCache[url] = dataUrl;
+      }
+    });
+  } catch (e) {
+    // A missing or unavailable cache must not hide the crop list.
+  }
+})();
+
+function persistCropIconCache() {
+  const snapshot = { ...cropIconCache };
+  cropIconCacheWrite = cropIconCacheWrite
+    .catch(() => {})
+    .then(() => browser.storage.local.set({ [CROP_ICON_CACHE_KEY]: snapshot }))
+    .catch(() => {});
+  return cropIconCacheWrite;
+}
+
+function forgetCropIcon(url) {
+  if (!Object.prototype.hasOwnProperty.call(cropIconCache, url)) return;
+  delete cropIconCache[url];
+  persistCropIconCache();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (isImageDataUrl(reader.result)) resolve(reader.result);
+      else reject(new Error("crop icon response is not an image"));
+    };
+    reader.onerror = () => reject(reader.error || new Error("failed to read crop icon"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function validateCropIconDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(dataUrl);
+    image.onerror = () => reject(new Error("crop icon data is not a valid PNG"));
+    image.src = dataUrl;
+  });
+}
+
+async function fetchCropIconDataUrl(url) {
+  const response = await fetch(url, { cache: "no-store", credentials: "omit" });
+  if (!response.ok) throw new Error(`crop icon request failed: ${response.status}`);
+  const blob = await response.blob();
+  if (!blob.size || (blob.type && !/^image\/png$/i.test(blob.type))) {
+    throw new Error("crop icon response is not a PNG");
+  }
+  const imageBlob = blob.type ? blob : blob.slice(0, blob.size, "image/png");
+  return blobToDataUrl(imageBlob).then(validateCropIconDataUrl);
+}
+
+function ensureCropIconData(url) {
+  if (!url) return Promise.reject(new Error("missing crop icon URL"));
+  if (cropIconCache[url]) return Promise.resolve(cropIconCache[url]);
+
+  const pending = pendingCropIconFetches.get(url);
+  if (pending) return pending;
+
+  const request = fetchCropIconDataUrl(url)
+    .then((dataUrl) => {
+      cropIconCache[url] = dataUrl;
+      // The cache has no expiry. The site is queried again only when this URL
+      // has never been stored successfully or a stored image fails to decode.
+      return persistCropIconCache().then(() => dataUrl);
+    })
+    .finally(() => pendingCropIconFetches.delete(url));
+  pendingCropIconFetches.set(url, request);
+  return request;
+}
 
 function cropIconUrls(crop) {
   const urls = [];
@@ -86,6 +186,15 @@ function cropIconUrls(crop) {
   if (seedId) urls.push(browser.runtime.getURL(`icons/crops/${seedId}.png`));
   urls.push(browser.runtime.getURL("icons/icon48.png"));
   return urls;
+}
+
+function cropIconSources(crop) {
+  const urls = cropIconUrls(crop);
+  const remoteIndex = urls.findIndex(isRemoteCropIconUrl);
+  const remoteUrl = remoteIndex >= 0 ? urls[remoteIndex] : null;
+  const fallbackUrls = urls.slice();
+  if (remoteIndex >= 0) fallbackUrls.splice(remoteIndex, 1);
+  return { remoteUrl, fallbackUrls };
 }
 
 // Lucide (MIT) inline icons, 24x24 stroke viewBox.
@@ -150,16 +259,58 @@ function renderCropRow(c) {
   const row = el("div", "row");
   const meta = el("div", "meta");
   const icon = el("img", "crop-icon");
-  const iconUrls = cropIconUrls(c);
-  let iconIndex = 0;
+  const { remoteUrl, fallbackUrls } = cropIconSources(c);
+  let fallbackIndex = 0;
+  let currentSource = "";
+  let usingCachedIcon = false;
   icon.alt = "";
   icon.referrerPolicy = "no-referrer";
+
+  const setSource = (source, cached) => {
+    currentSource = source;
+    usingCachedIcon = cached;
+    icon.hidden = false;
+    icon.src = source;
+  };
+  const showNextFallback = () => {
+    if (fallbackIndex >= fallbackUrls.length) {
+      icon.hidden = true;
+      currentSource = "";
+      return;
+    }
+    setSource(fallbackUrls[fallbackIndex++], false);
+  };
+
   icon.addEventListener("error", () => {
-    iconIndex += 1;
-    if (iconIndex < iconUrls.length) icon.src = iconUrls[iconIndex];
-    else icon.hidden = true;
+    // Ignore a late error from a source that was already replaced.
+    if ((icon.currentSrc || icon.src) !== currentSource) return;
+    if (usingCachedIcon && remoteUrl) {
+      usingCachedIcon = false;
+      forgetCropIcon(remoteUrl);
+      showNextFallback();
+      ensureCropIconData(remoteUrl)
+        .then((dataUrl) => {
+          if (icon.isConnected) setSource(dataUrl, true);
+        })
+        .catch(() => {});
+      return;
+    }
+    showNextFallback();
   });
-  icon.src = iconUrls[0];
+
+  const cachedDataUrl = remoteUrl && cropIconCache[remoteUrl];
+  if (cachedDataUrl) {
+    setSource(cachedDataUrl, true);
+  } else {
+    showNextFallback();
+    if (remoteUrl) {
+      ensureCropIconData(remoteUrl)
+        .then((dataUrl) => {
+          if (icon.isConnected) setSource(dataUrl, true);
+        })
+        .catch(() => {});
+    }
+  }
   meta.appendChild(icon);
   if (c.level != null) {
     meta.appendChild(Object.assign(el("span", "lv"), { textContent: `Lv${c.level}` }));
@@ -370,7 +521,10 @@ function afterStateChange() {
 async function main() {
   let state;
   try {
-    const res = await browser.runtime.sendMessage({ type: "getState" });
+    const [res] = await Promise.all([
+      browser.runtime.sendMessage({ type: "getState" }),
+      cropIconCacheReady,
+    ]);
     state = (res && res.state) || { crops: [], reminders: [] };
   } catch (e) {
     state = { crops: [], reminders: [] };

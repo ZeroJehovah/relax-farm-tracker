@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "轻松农场作物成熟追踪",
-  "version": "0.7.15",
-  "description": "记录黑与白福利站轻松农场的作物成熟时间，在图标显示最近成熟倒计时，支持成熟前后提醒。被动读取页面数据，不调用后端接口；图标使用站点静态图片。",
+  "version": "0.8.0",
+  "description": "记录黑与白福利站轻松农场的作物成熟时间，在图标显示最近成熟倒计时，支持成熟前后提醒。被动读取页面数据，不调用后端接口；站点静态作物图片成功加载后会永久缓存在本地。",
   "permissions": [
     "storage",
     "alarms",
@@ -13,7 +13,7 @@
     "https://cdk.hybgzs.com/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; img-src 'self' https://cdk.hybgzs.com/farm/crops/;"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://cdk.hybgzs.com; img-src 'self' data: https://cdk.hybgzs.com/farm/crops/;"
   },
   "background": {
     "service_worker": "background.js"
