@@ -278,6 +278,28 @@ body {
   flex-direction: column;
 }
 
+.opt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee9df;
+  cursor: pointer;
+  user-select: none;
+}
+
+.opt-toggle input[type="checkbox"] {
+  accent-color: #7e9a7a;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.opt-toggle-label {
+  font-size: 12px;
+  color: #6f685c;
+}
+
 .rem-list {
   display: flex;
   flex-direction: column;

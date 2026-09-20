@@ -92,7 +92,10 @@
     };
     const notifications = {
       create: chrome.notifications ? p(chrome.notifications, "create", noop) : noop,
+      clear: chrome.notifications ? p(chrome.notifications, "clear", noop) : noop,
       onClicked: chrome.notifications ? chrome.notifications.onClicked : { addListener() {} },
+      onButtonClicked: chrome.notifications ? chrome.notifications.onButtonClicked : { addListener() {} },
+      onClosed: chrome.notifications ? chrome.notifications.onClosed : { addListener() {} },
     };
     const tabs = {
       query: chrome.tabs ? p(chrome.tabs, "query", async () => []) : async () => [],
@@ -114,7 +117,7 @@
     runtime: { onMessage: evt, sendMessage: noop, onInstalled: evt, onStartup: evt, getURL: () => "" },
     alarms: { create: noop, get: async () => undefined, getAll: async () => [], clear: noop, onAlarm: evt },
     browserAction: { setBadgeText: noop, setBadgeBackgroundColor: noop, setTitle: noop },
-    notifications: { create: noop, onClicked: evt },
+    notifications: { create: noop, clear: noop, onClicked: evt, onButtonClicked: evt, onClosed: evt },
     tabs: { query: async () => [], update: noop, create: noop },
     windows: { update: noop },
   };

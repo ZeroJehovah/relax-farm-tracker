@@ -36,6 +36,7 @@ function defaultState() {
     plots: { totalSlots: 0, levels: {} },
     level: null,
     reminders: [], // [{id, enabled, mode:'before'|'after', seconds, lastFiredTarget}]
+    notifySticky: false, // keep reminder notifications on screen until acted on
     updatedAt: 0,
     diag: {
       lastCropsAt: 0,
@@ -165,10 +166,6 @@ function reminderTarget(reminder, nearest) {
     : nearest - reminder.seconds * 1000;
 }
 
-// Keep one notification per reminder target. Reusing only the reminder id
-// makes Chrome clear/replace an old, still-visible notification (especially
-// with requireInteraction); Windows can keep that replacement in Notification
-// Center without showing a distinct new toast.
 function reminderNotificationId(reminder, target) {
   return REMINDER_NOTIFICATION_PREFIX + reminder.id + "-" + String(Math.trunc(target));
 }
@@ -185,13 +182,24 @@ function fireNotification(reminder, target, cropsCount) {
     message = `你的作物即将成熟(~${part})`;
   }
   const notId = reminderNotificationId(reminder, target);
+  const sticky = !!(state && state.notifySticky);
   return Promise.resolve()
     .then(() => browser.notifications.create(notId, {
       type: "basic",
       iconUrl: browser.runtime.getURL("icons/icon128.png"),
       title: "轻松农场 · 作物提醒",
       message,
-      requireInteraction: true,
+      // Default (false): the notification behaves like a normal toast — the
+      // classic Chrome style shows a close button and clicking the body
+      // dismisses it; the new Windows 11 native style auto-dismisses per system
+      // defaults. Sticky keeps it on screen until acted on (opt-in; on the new
+      // native style there is no built-in close affordance, so an explicit
+      // button is the way to dismiss it).
+      requireInteraction: sticky,
+      buttons: [
+        { title: "知道了" },
+        { title: "打开农场" },
+      ],
     }))
     .then((createdId) => {
       // The shim intentionally resolves API errors to undefined for
@@ -232,15 +240,21 @@ function fireTestReminder() {
   const message = "你的作物即将成熟(~5min)";
   // Use a fresh id every time so repeated tests always re-deliver a visible
   // notification (Chrome may merely replace a still-open notification with the
-  // same id). requireInteraction keeps it on screen until the user acts, making
-  // delivery unmistakable.
+  // same id). Sticky (requireInteraction) keeps it on screen until acted on
+  // when the user opts in; otherwise it behaves like a normal toast so the test
+  // also matches the production delivery experience.
+  const sticky = !!(state && state.notifySticky);
   return browser.notifications
     .create("farm-reminder-test-" + Date.now(), {
       type: "basic",
       iconUrl: browser.runtime.getURL("icons/icon128.png"),
       title: "轻松农场 · 作物提醒",
       message,
-      requireInteraction: true,
+      requireInteraction: sticky,
+      buttons: [
+        { title: "知道了" },
+        { title: "打开农场" },
+      ],
     })
     .catch(() => {});
 }
@@ -592,6 +606,10 @@ browser.runtime.onMessage.addListener((msg) => {
       }
       case "openFarm":
         return openFarmTab().then(() => ({ ok: true }));
+      case "setNotifySticky": {
+        state.notifySticky = !!msg.sticky;
+        return persist().then(() => ({ ok: true, sticky: state.notifySticky }));
+      }
       case "testReminder":
         return fireTestReminder().then(() => ({ ok: true }));
       default:
@@ -601,8 +619,26 @@ browser.runtime.onMessage.addListener((msg) => {
   return ensureState().then(run);
 });
 
-browser.notifications.onClicked.addListener(() => {
-  return ensureState().then(openFarmTab);
+browser.notifications.onClicked.addListener((notId) => {
+  return ensureState()
+    .then(() => openFarmTab())
+    .then(() => {
+      // Clicking the body should dismiss the toast in both styles. Newer
+      // Windows native toasts may keep a requireInteraction notification on
+      // screen after the body click, so actively clear it.
+      if (!notId) return;
+      return browser.notifications.clear(notId).catch(() => {});
+    });
+});
+
+// Explicit notification buttons: "知道了" dismisses, "打开农场" opens the farm
+// tab. Buttons may render differently between the classic and the Windows 11
+// native notification style, so both actions also clear the toast.
+browser.notifications.onButtonClicked.addListener((notId, buttonIndex) => {
+  if (buttonIndex >= 1) {
+    return ensureState().then(openFarmTab).then(() => browser.notifications.clear(notId).catch(() => {}));
+  }
+  return browser.notifications.clear(notId).catch(() => {});
 });
 
 browser.alarms.onAlarm.addListener((alarm) => {

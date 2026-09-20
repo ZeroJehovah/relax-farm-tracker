@@ -548,6 +548,12 @@ async function main() {
   const nearest = renderCrops(state);
   renderReminders(state);
   renderReminderPreviews(state, nearest);
+
+  const stickyCB = document.getElementById("notify-sticky");
+  if (stickyCB) {
+    const sticky = !!(state && state.notifySticky);
+    if (stickyCB.checked !== sticky) stickyCB.checked = sticky;
+  }
 }
 
 document.getElementById("add-reminder").addEventListener("click", () => {
@@ -561,6 +567,15 @@ document.getElementById("open-farm").addEventListener("click", () => {
 document.getElementById("test-reminder").addEventListener("click", () => {
   browser.runtime.sendMessage({ type: "testReminder" });
 });
+
+const notifyStickyEl = document.getElementById("notify-sticky");
+if (notifyStickyEl) {
+  notifyStickyEl.addEventListener("change", () => {
+    browser.runtime
+      .sendMessage({ type: "setNotifySticky", sticky: notifyStickyEl.checked })
+      .then(afterStateChange);
+  });
+}
 
 main();
 setInterval(() => main(), 1000);
